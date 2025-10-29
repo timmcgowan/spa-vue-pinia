@@ -15,7 +15,6 @@ export const useUserStore = defineStore('user', {
   state: () => ({
     profile: null,
     manager: null,
-    organization: null,
     groups: [],
     photoDataUrl: null,
     loading: false,
@@ -29,10 +28,7 @@ export const useUserStore = defineStore('user', {
         const auth = useAuthStore()
         // ensure auth is initialised
         auth.init()
-        // Request expanded scopes; some may require admin consent. If consent is missing
-        // the requests to the specific endpoints will fail and we'll handle that gracefully.
-        const scopes = ['User.Read', 'GroupMember.Read.All', 'Directory.Read.All']
-        const token = await auth.getAccessToken(scopes)
+        const token = await auth.getAccessToken(['User.Read'])
         if (!token) {
           // redirect flow will navigate away; nothing to do
           this.loading = false
@@ -57,39 +53,17 @@ export const useUserStore = defineStore('user', {
           this.photoDataUrl = null
         }
 
-        // fetch manager (may require extra permissions in some tenants)
+        // fetch manager (User.Read should be sufficient in many tenants)
         try {
           const mgrResp = await axios.get(`${graphBase}/v1.0/me/manager`, {
             headers: { Authorization: `Bearer ${token}` }
           })
           this.manager = mgrResp.data
         } catch (mgrErr) {
-          // ignore if not available or no permission
           this.manager = null
         }
 
-        // fetch organization details (tenant-level info)
-        try {
-          const orgResp = await axios.get(`${graphBase}/v1.0/organization`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
-          // organization returns an array under 'value'
-          this.organization = Array.isArray(orgResp.data.value) ? orgResp.data.value[0] : orgResp.data
-        } catch (orgErr) {
-          this.organization = null
-        }
-
-        // fetch groups / memberOf
-        try {
-          const groupsResp = await axios.get(`${graphBase}/v1.0/me/memberOf`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
-          // memberOf returns directoryObjects; filter groups (group has '@odata.type' with 'group')
-          const vals = groupsResp.data.value || []
-          this.groups = vals.filter(v => v['@odata.type'] && v['@odata.type'].toLowerCase().includes('group'))
-        } catch (grpErr) {
-          this.groups = []
-        }
+        // (manager / organization / groups removed — only using /me and photo with User.Read scope)
 
       } catch (err) {
         this.error = err
@@ -104,6 +78,48 @@ export const useUserStore = defineStore('user', {
         reader.onload = () => resolve(reader.result)
         reader.readAsDataURL(blob)
       })
+    },
+    async loadOptionalData() {
+      // This attempts to acquire tokens for wider scopes (may trigger interactive consent/redirect)
+      this.loading = true
+      this.error = null
+      try {
+        const auth = useAuthStore()
+        // request broader scopes: User.Read.All and GroupMember.Read.All
+        const scopes = ['User.Read.All', 'GroupMember.Read.All']
+        const token = await auth.getAccessToken(scopes)
+        if (!token) {
+          this.loading = false
+          return
+        }
+
+        // fetch groups / memberOf
+        try {
+          const groupsResp = await axios.get(`${graphBase}/v1.0/me/memberOf`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+          const vals = groupsResp.data.value || []
+          this.groups = vals.filter(v => v['@odata.type'] && v['@odata.type'].toLowerCase().includes('group'))
+        } catch (grpErr) {
+          this.groups = []
+        }
+
+        // Optionally refresh manager with potentially expanded data
+        try {
+          const mgrResp = await axios.get(`${graphBase}/v1.0/me/manager`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+          this.manager = mgrResp.data
+        } catch (mgrErr) {
+          // keep previous manager if any
+        }
+
+      } catch (err) {
+        this.error = err
+        console.error('Failed to load optional data', err)
+      } finally {
+        this.loading = false
+      }
     },
     clear() {
       this.profile = null
