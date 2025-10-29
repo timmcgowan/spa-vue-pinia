@@ -30,7 +30,6 @@ export default {
   setup() {
     const auth = useAuthStore()
     const user = useUserStore()
-    auth.init()
 
     return {
       login: () => auth.loginRedirect(),
@@ -40,10 +39,6 @@ export default {
     }
   },
   mounted() {
-    // If authenticated, try to load profile
-    const auth = useAuthStore()
-    const user = useUserStore()
-    if (auth.isAuthenticated) user.loadProfile()
   }
 }
 </script>

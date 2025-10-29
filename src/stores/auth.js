@@ -4,7 +4,8 @@ import { PublicClientApplication, InteractionType } from '@azure/msal-browser'
 const msalConfig = {
   auth: {
     clientId: import.meta.env.VITE_MSAL_CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_MSAL_TENANT_ID}`,
+    // default to the public Azure cloud unless an authority is provided
+    authority: import.meta.env.VITE_MSAL_AUTHORITY || `https://login.microsoftonline.com/${import.meta.env.VITE_MSAL_TENANT_ID}`,
     redirectUri: import.meta.env.VITE_MSAL_REDIRECT_URI || window.location.origin
   },
   cache: {
@@ -28,11 +29,16 @@ export const useAuthStore = defineStore('auth', {
     }
   },
   actions: {
+    // initialize MSAL and return a promise that resolves after redirect handling completes
     init() {
-      if (this.msalInstance) return
+      if (this.msalInstance) {
+        // still return a resolved promise so callers can await
+        return Promise.resolve()
+      }
       this.msalInstance = new PublicClientApplication(msalConfig)
+
       // handle redirect promise (needed for redirect flow)
-      this.msalInstance.handleRedirectPromise().then((result) => {
+      return this.msalInstance.handleRedirectPromise().then((result) => {
         if (result && result.account) {
           this.account = result.account
         } else {
