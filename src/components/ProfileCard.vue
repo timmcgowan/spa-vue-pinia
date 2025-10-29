@@ -7,9 +7,12 @@
             <div style="margin-top:6px">
               <div><strong>Given name:</strong> {{ profile.givenName || '—' }}</div>
               <div><strong>Family name:</strong> {{ profile.surname || '—' }}</div>
-              <div><strong>Mail:</strong> {{ profile.mail || profile.userPrincipalName || '—' }}</div>
+              <div><strong>User Principal Name:</strong> {{ profile.userPrincipalName || '—' }}</div>
+              <div><strong>Mail:</strong> {{ profile.mail || '—' }}</div>
               <div><strong>Job:</strong> {{ profile.jobTitle || '—' }}</div>
+              <div><strong>Employee ID:</strong> {{ profile.employeeId || '—' }}</div>
               <div><strong>Employee Type:</strong> {{ profile.employeeType || '—' }}</div>
+              <div><strong>Preferred Language:</strong> {{ profile.preferredLanguage || '—' }}</div>
               <div style="margin-top:6px"><strong>Location:</strong>
                 <div>{{ profile.city || '—' }}{{ profile.state ? ', ' + profile.state : '' }}{{ profile.country ? ', ' + profile.country : '' }}</div>
               </div>
