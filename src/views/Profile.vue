@@ -9,9 +9,10 @@
       <div v-if="loading">Loading...</div>
       <div v-else-if="error">Error loading profile: {{ error.message || error }}</div>
       <div v-else-if="profile">
-        <ProfileCard :profile="profile" :photo="photoDataUrl" :manager="manager" :groups="groups" />
-        <div style="margin-top:12px">
+        <ProfileCard :profile="profile" :photo="photoDataUrl" :manager="manager" :groups="groups" :devices="devices" />
+        <div style="margin-top:12px; display:flex; gap:8px;">
           <button @click="loadOptional" :disabled="loading">Load groups & directory (may require consent)</button>
+          <button @click="loadDevices" :disabled="loading">Load devices (may require consent)</button>
         </div>
       </div>
       <div v-else>
@@ -38,7 +39,9 @@ export default {
       groups: user.groups,
       loading: user.loading,
       error: user.error,
-      loadOptional: () => user.loadOptionalData()
+      devices: user.devices,
+      loadOptional: () => user.loadOptionalData(),
+      loadDevices: () => user.loadDevices()
     }
   }
 }

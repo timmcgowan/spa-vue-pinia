@@ -16,6 +16,7 @@ export const useUserStore = defineStore('user', {
     profile: null,
     manager: null,
     groups: [],
+    devices: [],
     photoDataUrl: null,
     loading: false,
     error: null
@@ -121,9 +122,41 @@ export const useUserStore = defineStore('user', {
         this.loading = false
       }
     },
+    async loadDevices() {
+      // Attempts to load devices registered to the user. Requires Device.Read.All or Directory.Read.All.
+      this.loading = true
+      this.error = null
+      try {
+        const auth = useAuthStore()
+        const scopes = ['Device.Read.All']
+        const token = await auth.getAccessToken(scopes)
+        if (!token) {
+          this.loading = false
+          return
+        }
+
+        try {
+          const resp = await axios.get(`${graphBase}/v1.0/me/registeredDevices?$select=id,displayName`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+          this.devices = resp.data.value || []
+        } catch (dErr) {
+          this.devices = []
+        }
+
+      } catch (err) {
+        this.error = err
+        console.error('Failed to load devices', err)
+      } finally {
+        this.loading = false
+      }
+    },
     clear() {
       this.profile = null
       this.photoDataUrl = null
+      this.manager = null
+      this.groups = []
+      this.devices = []
       this.error = null
     }
   }
