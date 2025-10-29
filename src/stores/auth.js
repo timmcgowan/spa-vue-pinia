@@ -22,6 +22,7 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     msalInstance: null,
     account: null
+    ,claims: null
   }),
   getters: {
     isAuthenticated(state) {
@@ -41,13 +42,25 @@ export const useAuthStore = defineStore('auth', {
       return this.msalInstance.handleRedirectPromise().then((result) => {
         if (result && result.account) {
           this.account = result.account
+          // try to capture id token claims from the result or account
+          this.claims = result.idTokenClaims || result.account.idTokenClaims || null
         } else {
           const all = this.msalInstance.getAllAccounts()
-          if (all && all.length > 0) this.account = all[0]
+          if (all && all.length > 0) {
+            this.account = all[0]
+            this.claims = all[0].idTokenClaims || null
+          }
         }
       }).catch((e) => {
         console.error('MSAL handleRedirectPromise error', e)
       })
+    },
+    getClaims() {
+      // return cached claims or attempt to read from current account
+      if (this.claims) return this.claims
+      const acc = this.account || (this.msalInstance && this.msalInstance.getAllAccounts()[0])
+      this.claims = acc && acc.idTokenClaims ? acc.idTokenClaims : null
+      return this.claims
     },
     loginRedirect() {
       this.init()
