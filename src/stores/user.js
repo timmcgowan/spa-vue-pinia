@@ -17,6 +17,9 @@ export const useUserStore = defineStore('user', {
     manager: null,
     groups: [],
     devices: [],
+    employeeType: null,
+    employeeId: null,
+    roles: [],
     photoDataUrl: null,
     loading: false,
     error: null
@@ -40,6 +43,19 @@ export const useUserStore = defineStore('user', {
           headers: { Authorization: `Bearer ${token}` }
         })
         this.profile = profileResp.data
+
+        // Pull employee/roles claims if present in the id token
+        try {
+          const claims = auth.getClaims()
+          if (claims) {
+            // claims may use different casing/keys across tenants
+            this.employeeType = claims.employeeType || claims.employeetype || claims['extension_employeeType'] || null
+            this.employeeId = claims.employeeId || claims.employeeid || claims['extension_employeeId'] || null
+            this.roles = claims.roles || claims.role || claims.roles || []
+          }
+        } catch (cErr) {
+          // ignore
+        }
 
         // fetch photo
         try {
@@ -157,6 +173,9 @@ export const useUserStore = defineStore('user', {
       this.manager = null
       this.groups = []
       this.devices = []
+      this.employeeType = null
+      this.employeeId = null
+      this.roles = []
       this.error = null
     }
   }

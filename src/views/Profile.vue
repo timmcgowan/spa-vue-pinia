@@ -9,7 +9,16 @@
       <div v-if="loading">Loading...</div>
       <div v-else-if="error">Error loading profile: {{ error.message || error }}</div>
       <div v-else-if="profile">
-        <ProfileCard :profile="profile" :photo="photoDataUrl" :manager="manager" :groups="groups" :devices="devices" />
+        <ProfileCard
+          :profile="profile"
+          :photo="photoDataUrl"
+          :manager="manager"
+          :groups="groups"
+          :devices="devices"
+          :employee-type="employeeType"
+          :employee-id="employeeId"
+          :roles="roles"
+        />
         <div style="margin-top:12px; display:flex; gap:8px;">
           <button @click="loadOptional" :disabled="loading">Load groups & directory (may require consent)</button>
           <button @click="loadDevices" :disabled="loading">Load devices (may require consent)</button>
@@ -40,6 +49,9 @@ export default {
       loading: user.loading,
       error: user.error,
       devices: user.devices,
+      employeeType: user.employeeType,
+      employeeId: user.employeeId,
+      roles: user.roles,
       loadOptional: () => user.loadOptionalData(),
       loadDevices: () => user.loadDevices()
     }
