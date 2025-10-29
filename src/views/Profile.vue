@@ -9,7 +9,7 @@
       <div v-if="loading">Loading...</div>
       <div v-else-if="error">Error loading profile: {{ error.message || error }}</div>
       <div v-else-if="profile">
-        <ProfileCard :profile="profile" :photo="photoDataUrl" />
+        <ProfileCard :profile="profile" :photo="photoDataUrl" :manager="manager" :organization="organization" :groups="groups" />
       </div>
       <div v-else>
         <p>No profile loaded. Click below to load.</p>
@@ -31,6 +31,9 @@ export default {
       load: () => user.loadProfile(),
       profile: user.profile,
       photoDataUrl: user.photoDataUrl,
+        manager: user.manager,
+        organization: user.organization,
+        groups: user.groups,
       loading: user.loading,
       error: user.error
     }
