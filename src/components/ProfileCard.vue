@@ -10,7 +10,7 @@
               <div><strong>User Principal Name:</strong> {{ profile.userPrincipalName || '—' }}</div>
               <div><strong>Mail:</strong> {{ profile.mail || '—' }}</div>
               <div><strong>Job:</strong> {{ profile.jobTitle || '—' }}</div>
-              <div><strong>Employee ID:</strong> {{ employeeId || profile.employeeId || '—' }}</div>
+              <div><strong>Employee ID:</strong> {{ employeeId || profile.employeeId || profile.employeeID || profile.employeeid || '—' }}</div>
               <div><strong>Employee Type:</strong> {{ employeeType || profile.employeeType || '—' }}</div>
               <div><strong>Preferred Language:</strong> {{ profile.preferredLanguage || '—' }}</div>
               <div style="margin-top:6px"><strong>Location:</strong>

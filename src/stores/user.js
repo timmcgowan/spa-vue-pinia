@@ -48,10 +48,22 @@ export const useUserStore = defineStore('user', {
         try {
           const claims = auth.getClaims()
           if (claims) {
-            // claims may use different casing/keys across tenants
-            this.employeeType = claims.employeeType || claims.employeetype || claims['extension_employeeType'] || null
-            this.employeeId = claims.employeeId || claims.employeeid || claims['extension_employeeId'] || null
-            this.roles = claims.roles || claims.role || claims.roles || []
+            // helper to pick first existing claim variant (case-insensitive variants and extension names)
+            const pick = (...keys) => {
+              for (const k of keys) {
+                if (claims[k] !== undefined) return claims[k]
+              }
+              return null
+            }
+
+            this.employeeType = pick('employeeType', 'employeetype', 'extension_employeeType', 'extension_employeetype')
+            this.employeeId = pick('employeeId', 'employeeID', 'employeeid', 'extension_employeeId', 'extension_employeeid')
+
+            // roles may be in several shapes: 'roles' array, 'role' array/string, or 'roles' single string
+            const r = pick('roles', 'role')
+            if (!r) this.roles = []
+            else if (Array.isArray(r)) this.roles = r
+            else this.roles = String(r).split(',').map(s => s.trim()).filter(Boolean)
           }
         } catch (cErr) {
           // ignore
