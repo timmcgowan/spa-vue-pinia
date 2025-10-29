@@ -2,6 +2,15 @@ import { defineStore } from 'pinia'
 import { useAuthStore } from './auth'
 import axios from 'axios'
 
+// Determine the Microsoft Graph base URL to use. This supports sovereign clouds like
+// Microsoft US Government where the Graph endpoint is graph.microsoft.us.
+// Priority:
+// 1. VITE_GRAPH_ENDPOINT (explicit override)
+// 2. If VITE_MSAL_AUTHORITY contains 'microsoftonline.us' -> graph.microsoft.us
+// 3. Otherwise default to graph.microsoft.com
+const graphBase = import.meta.env.VITE_GRAPH_ENDPOINT
+  || (import.meta.env.VITE_MSAL_AUTHORITY && import.meta.env.VITE_MSAL_AUTHORITY.includes('microsoftonline.us') ? 'https://graph.microsoft.us' : 'https://graph.microsoft.com')
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     profile: null,
@@ -23,14 +32,14 @@ export const useUserStore = defineStore('user', {
           this.loading = false
           return
         }
-        const profileResp = await axios.get('https://graph.microsoft.com/v1.0/me', {
+        const profileResp = await axios.get(`${graphBase}/v1.0/me`, {
           headers: { Authorization: `Bearer ${token}` }
         })
         this.profile = profileResp.data
 
         // fetch photo
         try {
-          const photoResp = await axios.get('https://graph.microsoft.com/v1.0/me/photo/$value', {
+          const photoResp = await axios.get(`${graphBase}/v1.0/me/photo/$value`, {
             headers: { Authorization: `Bearer ${token}` },
             responseType: 'arraybuffer'
           })
