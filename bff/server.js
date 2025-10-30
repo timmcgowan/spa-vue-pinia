@@ -50,6 +50,10 @@ app.use((req, res, next) => {
       const decoded = jwt.decode(token)
       req.userClaims = decoded
       req.incomingToken = token
+      // normalize audience checks - aud can be a string or array; capture azp/appid for later
+      const aud = decoded && decoded.aud
+      req.tokenAudiences = Array.isArray(aud) ? aud : (aud ? [aud] : [])
+      req.tokenAzp = decoded && (decoded.azp || decoded.appid)
     } catch (e) {
       // decoding failed, ignore
       req.userClaims = null
@@ -58,6 +62,26 @@ app.use((req, res, next) => {
   }
   next()
 })
+
+// Helper: check whether the incoming token is intended for this BFF application
+function incomingTokenIsForThisApp(req) {
+  if (!req.userClaims) return false
+  const clientId = CLIENT_ID
+  // check audiences
+  const auds = req.tokenAudiences || []
+  for (const a of auds) {
+    if (!a) continue
+    if (a === clientId) return true
+    if (a === `api://${clientId}`) return true
+    if (a.includes(clientId)) return true
+  }
+  const azp = req.tokenAzp
+  if (azp) {
+    if (azp === clientId) return true
+    if (azp.includes(clientId)) return true
+  }
+  return false
+}
 
 // Helper: get an app token using client credentials
 async function getAppToken() {
@@ -80,15 +104,19 @@ app.get('/api/me', async (req, res) => {
   if (!id) return res.status(400).json({ error: 'Could not determine user id from token claims' })
 
   try {
-    // Prefer OBO when the incoming user token is present
+    // Prefer OBO when the incoming user token is present and is intended for this BFF app.
     let token
-    if (req.incomingToken) {
+    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
       } catch (oboErr) {
         console.warn('OBO failed, falling back to app token', oboErr.message || oboErr)
       }
+    } else if (req.incomingToken) {
+      // incoming token present but not intended for this app (aud mismatch). Skip OBO to avoid
+      // AcceptMappedClaims/audience validation errors and fall back to app token.
+      console.warn('Incoming token audience does not match this BFF client id; skipping OBO and using app token')
     }
 
     if (!token) token = await getAppToken()
@@ -123,15 +151,17 @@ app.get('/api/users/:id', async (req, res) => {
   const id = req.params.id
   if (!id) return res.status(400).json({ error: 'id required' })
   try {
-    // Prefer OBO if incoming user token present, otherwise use app token
+    // Prefer OBO if incoming user token present and intended for this BFF, otherwise use app token
     let token
-    if (req.incomingToken) {
+    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
       } catch (oboErr) {
         console.warn('OBO failed for /api/users, falling back to app token', oboErr.message || oboErr)
       }
+    } else if (req.incomingToken) {
+      console.warn('Incoming token audience does not match this BFF client id for /api/users; skipping OBO and using app token')
     }
 
     if (!token) token = await getAppToken()
@@ -150,13 +180,15 @@ app.get('/api/users/:id/photo', async (req, res) => {
   if (!id) return res.status(400).json({ error: 'id required' })
   try {
     let token
-    if (req.incomingToken) {
+    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
       } catch (oboErr) {
         console.warn('OBO failed for /api/users/:id/photo, falling back to app token', oboErr.message || oboErr)
       }
+    } else if (req.incomingToken) {
+      console.warn('Incoming token audience does not match this BFF client id for /api/users/:id/photo; skipping OBO and using app token')
     }
 
     if (!token) token = await getAppToken()
@@ -185,6 +217,11 @@ app.post('/api/obo/forward', async (req, res) => {
   const { method = 'GET', path, data = null, headers = {} } = req.body || {}
   if (!path) return res.status(400).json({ error: 'path required' })
   try {
+    // For the obo/forward endpoint we require the incoming token to be intended for this BFF.
+    if (!incomingTokenIsForThisApp(req)) {
+      return res.status(400).json({ error: 'Incoming token audience does not match BFF client. Request a delegated token for the BFF (audience = your BFF app) before calling /api/obo/forward.' })
+    }
+
     const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
     const token = oboResp && oboResp.accessToken
     if (!token) return res.status(500).json({ error: 'Failed to acquire OBO token' })
