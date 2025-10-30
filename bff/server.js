@@ -252,6 +252,20 @@ app.post('/auth/logout', (req, res) => {
   })
 })
 
+// Dev helper: inspect session state (only when BFF_DEBUG=true or running on localhost)
+app.get('/auth/session', (req, res) => {
+  const debug = (process.env.BFF_DEBUG || 'false').toLowerCase() === 'true'
+  const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1'
+  if (!debug && !isLocal) return res.status(404).send('Not found')
+  const sess = req.session || null
+  const info = {
+    hasSession: !!sess && !!sess.tokenResponse,
+    tokenInfo: sess && sess.tokenResponse ? { expiresOn: sess.tokenResponse.expiresOn, account: sess.tokenResponse.account && (sess.tokenResponse.account.username || sess.tokenResponse.account.homeAccountId) } : null,
+    requestedScopes: sess && sess.requestedScopes ? sess.requestedScopes : null
+  }
+  return res.json(info)
+})
+
 // GET /api/me - returns user profile by using app token to call graph /users/{oid or upn}
 // This is a simple approach: decode incoming token to find `oid` or `upn` then use app token to fetch the user object.
 app.get('/api/me', async (req, res) => {
