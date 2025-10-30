@@ -1,7 +1,7 @@
 const express = require('express')
 const axios = require('axios')
 const jwt = require('jsonwebtoken')
-const { ConfidentialClientApplication } = require('@azure/msal-node')
+const { ConfidentialClientApplication, LogLevel } = require('@azure/msal-node')
 const cors = require('cors')
 
 require('dotenv').config()
@@ -25,11 +25,54 @@ if (!CLIENT_ID || !CLIENT_SECRET) {
   console.warn('BFF: BFF_CLIENT_ID and BFF_CLIENT_SECRET should be set in environment. Client credentials flow will fail without them.')
 }
 
+// Configure MSAL logging options
+const envLogLevel = (process.env.BFF_MSAL_LOG_LEVEL || process.env.MSAL_LOG_LEVEL || 'info').toLowerCase()
+const enablePii = (process.env.BFF_MSAL_PII || process.env.MSAL_PII || 'false').toLowerCase() === 'true'
+
+const logLevelMap = {
+  'error': LogLevel.Error,
+  'warning': LogLevel.Warning,
+  'warn': LogLevel.Warning,
+  'info': LogLevel.Info,
+  'verbose': LogLevel.Verbose,
+  'trace': LogLevel.Verbose,
+  'debug': LogLevel.Verbose
+}
+
+const selectedLogLevel = logLevelMap[envLogLevel] !== undefined ? logLevelMap[envLogLevel] : LogLevel.Info
+
 const msalConfig = {
   auth: {
     clientId: CLIENT_ID,
     authority: AUTHORITY,
     clientSecret: CLIENT_SECRET
+  },
+  system: {
+    loggerOptions: {
+      loggerCallback(logLevel, message, containsPii) {
+        // respect PII setting
+        if (containsPii && !enablePii) return
+        try {
+          switch (logLevel) {
+            case LogLevel.Error:
+              console.error('[msal]', message)
+              break
+            case LogLevel.Warning:
+              console.warn('[msal]', message)
+              break
+            case LogLevel.Info:
+              console.info('[msal]', message)
+              break
+            default:
+              console.debug('[msal]', message)
+          }
+        } catch (e) {
+          // swallow logging errors
+        }
+      },
+      piiLoggingEnabled: enablePii,
+      logLevel: selectedLogLevel
+    }
   }
 }
 
