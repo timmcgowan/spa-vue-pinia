@@ -37,17 +37,10 @@ export const useUserStore = defineStore('user', {
         // ensure auth is initialised
         await auth.init()
 
-        // If a BFF is configured, request the BFF-scoped token and call the BFF /api/me endpoint.
-        // The BFF can perform OBO and may return the profile + photo as a data URL.
-        if (bffScope) {
-          const token = await auth.getAccessToken(bffScope)
-          if (!token) {
-            this.loading = false
-            return
-          }
-          const resp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/me`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
+        // If a BFF is configured, call the BFF /api/me endpoint and rely on server session cookies.
+        // The SPA should not need to hold delegated user tokens when using server-managed sessions.
+        if (bffBase) {
+          const resp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/me`, { withCredentials: true })
           this.profile = resp.data.profile
           // server may include photoDataUrl and claims
           this.photoDataUrl = resp.data.photoDataUrl || null
@@ -158,20 +151,13 @@ export const useUserStore = defineStore('user', {
         const auth = useAuthStore()
 
         // If a BFF is configured, call the BFF and let it perform OBO to Graph on behalf of the user.
-        if (bffScope) {
-          const token = await auth.getAccessToken(bffScope)
-          if (!token) {
-            this.loading = false
-            return
-          }
-
+        if (bffBase) {
+          // call BFF graph forward using server-managed session
           try {
             const groupsResp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
               method: 'GET',
               path: '/v1.0/me/memberOf'
-            }, {
-              headers: { Authorization: `Bearer ${token}` }
-            })
+            }, { withCredentials: true })
             const vals = groupsResp.data.value || []
             this.groups = vals.filter(v => v['@odata.type'] && v['@odata.type'].toLowerCase().includes('group'))
           } catch (grpErr) {
@@ -183,9 +169,7 @@ export const useUserStore = defineStore('user', {
             const mgrResp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
               method: 'GET',
               path: '/v1.0/me/manager'
-            }, {
-              headers: { Authorization: `Bearer ${token}` }
-            })
+            }, { withCredentials: true })
             this.manager = mgrResp.data
           } catch (mgrErr) {
             // keep previous manager if any
@@ -236,23 +220,12 @@ export const useUserStore = defineStore('user', {
       try {
         const auth = useAuthStore()
 
-        if (bffScope) {
-          const token = await auth.getAccessToken(bffScope)
-          if (!token) {
-            this.loading = false
-            return
-          }
-          try {
-            const resp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
-              method: 'GET',
-              path: '/v1.0/me/registeredDevices?$select=id,displayName'
-            }, {
-              headers: { Authorization: `Bearer ${token}` }
-            })
-            this.devices = resp.data.value || []
-          } catch (dErr) {
-            this.devices = []
-          }
+        if (bffBase) {
+          const resp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
+            method: 'GET',
+            path: '/v1.0/me/registeredDevices?$select=id,displayName'
+          }, { withCredentials: true })
+          this.devices = resp.data.value || []
         } else {
           const scopes = ['Device.Read.All']
           const token = await auth.getAccessToken(scopes)

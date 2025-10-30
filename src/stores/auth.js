@@ -63,6 +63,15 @@ export const useAuthStore = defineStore('auth', {
       return this.claims
     },
     loginRedirect() {
+      // If a BFF is configured for server-side auth, redirect the browser to the BFF login
+      const bffBase = import.meta.env.VITE_BFF_BASE
+      const frontend = import.meta.env.VITE_MSAL_REDIRECT_URI || window.location.origin
+      if (bffBase) {
+        const url = `${bffBase.replace(/\/$/, '')}/auth/login?returnTo=${encodeURIComponent(frontend)}`
+        window.location.href = url
+        return
+      }
+
       this.init()
       // Build login scopes dynamically: include the BFF scope if configured so consent can be collected.
       const bffScope = import.meta.env.VITE_BFF_SCOPE
@@ -71,6 +80,16 @@ export const useAuthStore = defineStore('auth', {
       return this.msalInstance.loginRedirect({ scopes })
     },
     logoutRedirect() {
+      // If using BFF-managed sessions, call BFF logout to clear session cookie
+      const bffBase = import.meta.env.VITE_BFF_BASE
+      if (bffBase) {
+        // POST to /auth/logout will clear session; do a full page refresh afterwards
+        fetch(`${bffBase.replace(/\/$/, '')}/auth/logout`, { method: 'POST', credentials: 'include' })
+          .then(() => { window.location.href = import.meta.env.VITE_MSAL_REDIRECT_URI || window.location.origin })
+          .catch(() => { window.location.href = import.meta.env.VITE_MSAL_REDIRECT_URI || window.location.origin })
+        return
+      }
+
       if (!this.msalInstance) this.init()
       const logoutRequest = { account: this.account }
       return this.msalInstance.logoutRedirect(logoutRequest)

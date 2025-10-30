@@ -79,24 +79,13 @@ export default {
         const idOrUpn = encodeURIComponent(idOrUpnRaw)
 
         // If BFF is configured, call the BFF endpoints which will perform OBO/app token work.
-        if (bffBase && bffScope) {
-          const token = await auth.getAccessToken(bffScope)
-          if (!token) {
-            loading.value = false
-            return
-          }
-
-          // fetch user via BFF
-          const resp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/users/${idOrUpn}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
+        if (bffBase) {
+          // Use server-managed session cookies (BFF) to fetch the user and photo
+          const resp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/users/${idOrUpn}`, { withCredentials: true })
           user.value = resp.data
 
-          // fetch photo via BFF helper endpoint
           try {
-            const pResp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/users/${idOrUpn}/photo`, {
-              headers: { Authorization: `Bearer ${token}` }
-            })
+            const pResp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/users/${idOrUpn}/photo`, { withCredentials: true })
             photo.value = pResp.data.photoDataUrl || null
           } catch (photoErr) {
             photo.value = null

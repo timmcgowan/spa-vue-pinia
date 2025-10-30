@@ -35,9 +35,28 @@ const msalConfig = {
 
 const cca = new ConfidentialClientApplication(msalConfig)
 
+const session = require('express-session')
+const crypto = require('crypto')
+
 const app = express()
 app.use(express.json())
-app.use(cors())
+
+// CORS: allow the frontend origin and allow credentials (cookies)
+const FRONTEND_ORIGIN = process.env.FRONTEND_REDIRECT_URI || process.env.VITE_BFF_FRONTEND || 'http://localhost:4000'
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }))
+
+// Sessions (in-memory for dev). In prod use Redis or a persistent store.
+const sessionSecret = process.env.BFF_SESSION_SECRET || crypto.randomBytes(32).toString('hex')
+app.use(session({
+  secret: sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax'
+  }
+}))
 
 // Simple middleware to extract bearer token from incoming requests and decode claims.
 // NOTE: This does NOT validate the token signature. For production you should
@@ -62,6 +81,45 @@ app.use((req, res, next) => {
   }
   next()
 })
+
+// Helper: get an access token from the current session if present and valid.
+async function getSessionAccessToken(req) {
+  try {
+    if (!req.session || !req.session.tokenResponse) return null
+    const tr = req.session.tokenResponse
+    // tokenResponse may include expiresOn as a Date or string
+    if (tr.accessToken && tr.expiresOn) {
+      const exp = new Date(tr.expiresOn)
+      if (exp.getTime() > Date.now() + 5000) {
+        return tr.accessToken
+      }
+    } else if (tr.accessToken) {
+      return tr.accessToken
+    }
+
+    // attempt refresh using refresh token if available
+    if (tr.refreshToken) {
+      try {
+        const refreshResp = await cca.acquireTokenByRefreshToken({ refreshToken: tr.refreshToken, scopes: graphScope })
+        if (refreshResp && refreshResp.accessToken) {
+          // persist new tokenResponse minimal fields
+          req.session.tokenResponse = {
+            accessToken: refreshResp.accessToken,
+            refreshToken: refreshResp.refreshToken || tr.refreshToken,
+            expiresOn: refreshResp.expiresOn || new Date(Date.now() + (refreshResp.expiresIn || 3600) * 1000),
+            account: refreshResp.account || tr.account
+          }
+          return req.session.tokenResponse.accessToken
+        }
+      } catch (rErr) {
+        console.warn('refresh token failed', rErr.message || rErr)
+      }
+    }
+  } catch (e) {
+    console.error('getSessionAccessToken error', e)
+  }
+  return null
+}
 
 // Helper: check whether the incoming token is intended for this BFF application
 function incomingTokenIsForThisApp(req) {
@@ -95,6 +153,62 @@ app.get('/api/claims', (req, res) => {
   return res.json(req.userClaims)
 })
 
+// --- Auth routes for BFF-managed sessions ---
+// GET /auth/login -> redirects user to Azure AD to begin auth code flow
+app.get('/auth/login', async (req, res) => {
+  try {
+    // store state and requested scopes in session
+    const state = crypto.randomBytes(16).toString('hex')
+    req.session.authState = state
+    const requested = (process.env.BFF_DELEGATED_SCOPES || 'openid,profile,offline_access,User.Read').split(',').map(s => s.trim()).filter(Boolean)
+    req.session.requestedScopes = requested
+    const redirectUri = process.env.BFF_REDIRECT_URI || `http://localhost:${PORT}/auth/callback`
+    const authCodeUrlParameters = {
+      scopes: requested,
+      redirectUri,
+      state
+    }
+    const authCodeUrl = await cca.getAuthCodeUrl(authCodeUrlParameters)
+    return res.redirect(authCodeUrl)
+  } catch (e) {
+    console.error('auth/login error', e)
+    return res.status(500).send('Failed to start auth flow')
+  }
+})
+
+// GET /auth/callback -> Azure AD redirects here with code; exchange for tokens and create session
+app.get('/auth/callback', async (req, res) => {
+  const { code, state } = req.query || {}
+  try {
+    if (!state || state !== req.session.authState) return res.status(400).send('Invalid state')
+    const redirectUri = process.env.BFF_REDIRECT_URI || `http://localhost:${PORT}/auth/callback`
+    const scopes = req.session.requestedScopes || (process.env.BFF_DELEGATED_SCOPES || 'openid,profile,offline_access,User.Read').split(',').map(s => s.trim()).filter(Boolean)
+    const tokenResponse = await cca.acquireTokenByCode({ code, scopes, redirectUri })
+    // persist minimal token info in session
+    req.session.tokenResponse = {
+      accessToken: tokenResponse.accessToken,
+      refreshToken: tokenResponse.refreshToken,
+      expiresOn: tokenResponse.expiresOn || new Date(Date.now() + (tokenResponse.expiresIn || 3600) * 1000),
+      account: tokenResponse.account
+    }
+    // redirect back to frontend
+    const frontend = process.env.FRONTEND_REDIRECT_URI || 'http://localhost:4000'
+    return res.redirect(frontend)
+  } catch (e) {
+    console.error('auth/callback error', e.response ? e.response.data : e.message || e)
+    return res.status(500).send('Failed to complete auth')
+  }
+})
+
+// POST /auth/logout -> destroy session and redirect
+app.post('/auth/logout', (req, res) => {
+  req.session.destroy(() => {
+    const frontend = process.env.FRONTEND_REDIRECT_URI || 'http://localhost:4000'
+    res.clearCookie('connect.sid')
+    return res.json({ ok: true, redirect: frontend })
+  })
+})
+
 // GET /api/me - returns user profile by using app token to call graph /users/{oid or upn}
 // This is a simple approach: decode incoming token to find `oid` or `upn` then use app token to fetch the user object.
 app.get('/api/me', async (req, res) => {
@@ -104,9 +218,13 @@ app.get('/api/me', async (req, res) => {
   if (!id) return res.status(400).json({ error: 'Could not determine user id from token claims' })
 
   try {
-    // Prefer OBO when the incoming user token is present and is intended for this BFF app.
+    // Prefer session-stored access token (BFF-managed). If no session token, attempt OBO
+    // when the incoming bearer token is intended for this BFF app. Otherwise fall back to app token.
     let token
-    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
+    const sessionToken = await getSessionAccessToken(req)
+    if (sessionToken) {
+      token = sessionToken
+    } else if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
@@ -114,8 +232,6 @@ app.get('/api/me', async (req, res) => {
         console.warn('OBO failed, falling back to app token', oboErr.message || oboErr)
       }
     } else if (req.incomingToken) {
-      // incoming token present but not intended for this app (aud mismatch). Skip OBO to avoid
-      // AcceptMappedClaims/audience validation errors and fall back to app token.
       console.warn('Incoming token audience does not match this BFF client id; skipping OBO and using app token')
     }
 
@@ -151,9 +267,12 @@ app.get('/api/users/:id', async (req, res) => {
   const id = req.params.id
   if (!id) return res.status(400).json({ error: 'id required' })
   try {
-    // Prefer OBO if incoming user token present and intended for this BFF, otherwise use app token
+    // Prefer session token, otherwise OBO when incoming token is for this app, then app token
     let token
-    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
+    const sessionToken = await getSessionAccessToken(req)
+    if (sessionToken) {
+      token = sessionToken
+    } else if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
@@ -179,8 +298,12 @@ app.get('/api/users/:id/photo', async (req, res) => {
   const id = req.params.id
   if (!id) return res.status(400).json({ error: 'id required' })
   try {
+    // Prefer session token, otherwise OBO then app token
     let token
-    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
+    const sessionToken = await getSessionAccessToken(req)
+    if (sessionToken) {
+      token = sessionToken
+    } else if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
@@ -213,18 +336,25 @@ app.get('/api/users/:id/photo', async (req, res) => {
 
 // POST /api/obo/forward - forward a request to Microsoft Graph using OBO (requires incoming user token)
 app.post('/api/obo/forward', async (req, res) => {
-  if (!req.incomingToken) return res.status(401).json({ error: 'No incoming user token for OBO' })
   const { method = 'GET', path, data = null, headers = {} } = req.body || {}
   if (!path) return res.status(400).json({ error: 'path required' })
   try {
-    // For the obo/forward endpoint we require the incoming token to be intended for this BFF.
-    if (!incomingTokenIsForThisApp(req)) {
-      return res.status(400).json({ error: 'Incoming token audience does not match BFF client. Request a delegated token for the BFF (audience = your BFF app) before calling /api/obo/forward.' })
+    // If the session has a user token, use it to call Graph on behalf of the user.
+    const sessionToken = await getSessionAccessToken(req)
+    let token = null
+    if (sessionToken) {
+      token = sessionToken
+    } else {
+      // otherwise require an incoming bearer token that is intended for this BFF
+      if (!req.incomingToken) return res.status(401).json({ error: 'No incoming user token for OBO' })
+      if (!incomingTokenIsForThisApp(req)) {
+        return res.status(400).json({ error: 'Incoming token audience does not match BFF client. Request a delegated token for the BFF (audience = your BFF app) before calling /api/obo/forward.' })
+      }
+      const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
+      token = oboResp && oboResp.accessToken
+      if (!token) return res.status(500).json({ error: 'Failed to acquire OBO token' })
     }
 
-    const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
-    const token = oboResp && oboResp.accessToken
-    if (!token) return res.status(500).json({ error: 'Failed to acquire OBO token' })
     const url = `${process.env.BFF_GRAPH_BASE || 'https://graph.microsoft.com'}${path}`
     const resp = await axios({ method, url, data, headers: { Authorization: `Bearer ${token}`, ...headers } })
     return res.json(resp.data)
