@@ -46,6 +46,8 @@ import { useAuthStore } from '../stores/auth'
 import axios from 'axios'
 
 const graphBase = import.meta.env.VITE_GRAPH_ENDPOINT || (import.meta.env.VITE_MSAL_AUTHORITY && import.meta.env.VITE_MSAL_AUTHORITY.includes('microsoftonline.us') ? 'https://graph.microsoft.us' : 'https://graph.microsoft.com')
+const bffBase = import.meta.env.VITE_BFF_BASE || null
+const bffScope = import.meta.env.VITE_BFF_SCOPE ? [import.meta.env.VITE_BFF_SCOPE] : null
 
 export default {
   setup() {
@@ -68,33 +70,66 @@ export default {
       showRaw.value = false
       try {
         const auth = useAuthStore()
-        // request permission to read other users — this may trigger a consent flow
-        const token = await auth.getAccessToken(['User.Read.All'])
-        if (!token) {
+
+        const idOrUpnRaw = query.value.trim()
+        if (!idOrUpnRaw) {
           loading.value = false
           return
         }
+        const idOrUpn = encodeURIComponent(idOrUpnRaw)
 
-        const idOrUpn = encodeURIComponent(query.value.trim())
-        const resp = await axios.get(`${graphBase}/v1.0/users/${idOrUpn}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        user.value = resp.data
+        // If BFF is configured, call the BFF endpoints which will perform OBO/app token work.
+        if (bffBase && bffScope) {
+          const token = await auth.getAccessToken(bffScope)
+          if (!token) {
+            loading.value = false
+            return
+          }
 
-        // try to load photo
-        try {
-          const photoResp = await axios.get(`${graphBase}/v1.0/users/${idOrUpn}/photo/$value`, {
-            headers: { Authorization: `Bearer ${token}` },
-            responseType: 'arraybuffer'
+          // fetch user via BFF
+          const resp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/users/${idOrUpn}`, {
+            headers: { Authorization: `Bearer ${token}` }
           })
-          const blob = new Blob([photoResp.data], { type: 'image/jpeg' })
-          photo.value = await new Promise((resolve) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result)
-            reader.readAsDataURL(blob)
+          user.value = resp.data
+
+          // fetch photo via BFF helper endpoint
+          try {
+            const pResp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/users/${idOrUpn}/photo`, {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            photo.value = pResp.data.photoDataUrl || null
+          } catch (photoErr) {
+            photo.value = null
+          }
+
+        } else {
+          // request permission to read other users — this may trigger a consent flow
+          const token = await auth.getAccessToken(['User.Read.All'])
+          if (!token) {
+            loading.value = false
+            return
+          }
+
+          const resp = await axios.get(`${graphBase}/v1.0/users/${idOrUpn}`, {
+            headers: { Authorization: `Bearer ${token}` }
           })
-        } catch (photoErr) {
-          photo.value = null
+          user.value = resp.data
+
+          // try to load photo directly from Graph
+          try {
+            const photoResp = await axios.get(`${graphBase}/v1.0/users/${idOrUpn}/photo/$value`, {
+              headers: { Authorization: `Bearer ${token}` },
+              responseType: 'arraybuffer'
+            })
+            const blob = new Blob([photoResp.data], { type: 'image/jpeg' })
+            photo.value = await new Promise((resolve) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(reader.result)
+              reader.readAsDataURL(blob)
+            })
+          } catch (photoErr) {
+            photo.value = null
+          }
         }
 
       } catch (err) {

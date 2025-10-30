@@ -144,6 +144,41 @@ app.get('/api/users/:id', async (req, res) => {
   }
 })
 
+// GET /api/users/:id/photo - returns the user's photo as a data URL when available
+app.get('/api/users/:id/photo', async (req, res) => {
+  const id = req.params.id
+  if (!id) return res.status(400).json({ error: 'id required' })
+  try {
+    let token
+    if (req.incomingToken) {
+      try {
+        const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
+        token = oboResp && oboResp.accessToken
+      } catch (oboErr) {
+        console.warn('OBO failed for /api/users/:id/photo, falling back to app token', oboErr.message || oboErr)
+      }
+    }
+
+    if (!token) token = await getAppToken()
+    const graphBase = process.env.BFF_GRAPH_BASE || 'https://graph.microsoft.com'
+    const url = `${graphBase}/v1.0/users/${encodeURIComponent(id)}/photo/$value`
+    try {
+      const photoResp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, responseType: 'arraybuffer' })
+      const contentType = (photoResp.headers && (photoResp.headers['content-type'] || photoResp.headers['Content-Type'])) || 'image/jpeg'
+      const buffer = Buffer.from(photoResp.data, 'binary')
+      const base64 = buffer.toString('base64')
+      const photoDataUrl = `data:${contentType};base64,${base64}`
+      return res.json({ photoDataUrl })
+    } catch (pErr) {
+      // Not found or no photo
+      return res.status(404).json({ error: 'Photo not found' })
+    }
+  } catch (err) {
+    console.error('BFF /api/users/:id/photo error', err.response ? err.response.data : err.message)
+    return res.status(500).json({ error: 'Failed to load user photo from Graph', details: err.response ? err.response.data : err.message })
+  }
+})
+
 // POST /api/obo/forward - forward a request to Microsoft Graph using OBO (requires incoming user token)
 app.post('/api/obo/forward', async (req, res) => {
   if (!req.incomingToken) return res.status(401).json({ error: 'No incoming user token for OBO' })
