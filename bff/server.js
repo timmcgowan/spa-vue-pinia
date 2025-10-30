@@ -11,6 +11,16 @@ const CLIENT_ID = process.env.BFF_CLIENT_ID
 const CLIENT_SECRET = process.env.BFF_CLIENT_SECRET
 const TENANT_ID = process.env.BFF_TENANT_ID || 'common'
 
+// Allow explicit authority and graph scope configuration for sovereign clouds.
+// Examples:
+// BFF_AUTHORITY=https://login.microsoftonline.us/<tenant-id>
+// BFF_GRAPH_SCOPE=https://graph.microsoft.us/.default
+const AUTHORITY = process.env.BFF_AUTHORITY || `https://login.microsoftonline.com/${TENANT_ID}`
+
+// Allow comma-separated scope lists in env; fall back to the Microsoft Graph default scope.
+const graphScopeEnv = process.env.BFF_GRAPH_SCOPE || process.env.BFF_GRAPHSCOPES || null
+const graphScope = graphScopeEnv ? graphScopeEnv.split(',').map(s => s.trim()).filter(Boolean) : ['https://graph.microsoft.com/.default']
+
 if (!CLIENT_ID || !CLIENT_SECRET) {
   console.warn('BFF: BFF_CLIENT_ID and BFF_CLIENT_SECRET should be set in environment. Client credentials flow will fail without them.')
 }
@@ -18,14 +28,12 @@ if (!CLIENT_ID || !CLIENT_SECRET) {
 const msalConfig = {
   auth: {
     clientId: CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    authority: AUTHORITY,
     clientSecret: CLIENT_SECRET
   }
 }
 
 const cca = new ConfidentialClientApplication(msalConfig)
-
-const graphScope = ['https://graph.microsoft.com/.default']
 
 const app = express()
 app.use(express.json())
