@@ -269,19 +269,44 @@ app.get('/auth/session', (req, res) => {
 // GET /api/me - returns user profile by using app token to call graph /users/{oid or upn}
 // This is a simple approach: decode incoming token to find `oid` or `upn` then use app token to fetch the user object.
 app.get('/api/me', async (req, res) => {
-  if (!req.userClaims) return res.status(401).json({ error: 'No bearer token provided' })
-  const claims = req.userClaims
-  const id = claims.oid || claims.sub || claims.upn || claims.preferred_username
-  if (!id) return res.status(400).json({ error: 'Could not determine user id from token claims' })
-
   try {
-    // Prefer session-stored access token (BFF-managed). If no session token, attempt OBO
-    // when the incoming bearer token is intended for this BFF app. Otherwise fall back to app token.
-    let token
+    // Prefer session-stored access token (BFF-managed). If a session token exists,
+    // use it and call the Graph /me endpoint. Otherwise fall back to OBO when an
+    // incoming bearer token is intended for this BFF, or finally the app token.
+    let token = null
     const sessionToken = await getSessionAccessToken(req)
+    const graphBase = process.env.BFF_GRAPH_BASE || 'https://graph.microsoft.com'
+
+    let profileResp = null
+
     if (sessionToken) {
       token = sessionToken
-    } else if (req.incomingToken && incomingTokenIsForThisApp(req)) {
+      // session token belongs to the signed-in user; call /me
+      profileResp = await axios.get(`${graphBase}/v1.0/me`, { headers: { Authorization: `Bearer ${token}` } })
+      // try to fetch photo too
+      let photoDataUrl = null
+      try {
+        const photoResp = await axios.get(`${graphBase}/v1.0/me/photo/$value`, { headers: { Authorization: `Bearer ${token}` }, responseType: 'arraybuffer' })
+        const contentType = (photoResp.headers && (photoResp.headers['content-type'] || photoResp.headers['Content-Type'])) || 'image/jpeg'
+        const buffer = Buffer.from(photoResp.data, 'binary')
+        const base64 = buffer.toString('base64')
+        photoDataUrl = `data:${contentType};base64,${base64}`
+      } catch (photoErr) {
+        photoDataUrl = null
+      }
+      // return profile and claims (claims may be empty when using session)
+      const claims = req.userClaims || null
+      return res.json({ profile: profileResp.data, claims, photoDataUrl })
+    }
+
+    // No session token: attempt to use incoming bearer token claims to determine id
+    if (!req.userClaims) return res.status(401).json({ error: 'No session or bearer token provided' })
+    const claims = req.userClaims
+    const id = claims.oid || claims.sub || claims.upn || claims.preferred_username
+    if (!id) return res.status(400).json({ error: 'Could not determine user id from token claims' })
+
+    // Try OBO when the incoming bearer token is intended for this BFF app. Otherwise fall back to app token.
+    if (req.incomingToken && incomingTokenIsForThisApp(req)) {
       try {
         const oboResp = await cca.acquireTokenOnBehalfOf({ oboAssertion: req.incomingToken, scopes: graphScope })
         token = oboResp && oboResp.accessToken
@@ -294,7 +319,6 @@ app.get('/api/me', async (req, res) => {
 
     if (!token) token = await getAppToken()
 
-    const graphBase = process.env.BFF_GRAPH_BASE || 'https://graph.microsoft.com'
     const url = `${graphBase}/v1.0/users/${encodeURIComponent(id)}`
     const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } })
 
