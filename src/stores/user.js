@@ -11,7 +11,11 @@ import axios from 'axios'
 const graphBase = import.meta.env.VITE_GRAPH_ENDPOINT
   || (import.meta.env.VITE_MSAL_AUTHORITY && import.meta.env.VITE_MSAL_AUTHORITY.includes('microsoftonline.us') ? 'https://graph.microsoft.us' : 'https://graph.microsoft.com')
 
-// BFF configuration (frontend will call BFF endpoints when VITE_BFF_BASE and VITE_BFF_SCOPE are provided)
+// BFF configuration (frontend will call proxied relative `/api/*` endpoints when
+// VITE_BFF_BASE is set in dev). `useBff` controls whether to hit the BFF; we keep
+// `bffBase` for any non-proxied or production usage but prefer relative paths in
+// development so the Vite proxy preserves cookies and avoids CORS.
+const useBff = Boolean(import.meta.env.VITE_BFF_BASE)
 const bffBase = import.meta.env.VITE_BFF_BASE || 'http://localhost:3000'
 const bffScope = import.meta.env.VITE_BFF_SCOPE ? [import.meta.env.VITE_BFF_SCOPE] : null
 
@@ -39,8 +43,9 @@ export const useUserStore = defineStore('user', {
 
         // If a BFF is configured, call the BFF /api/me endpoint and rely on server session cookies.
         // The SPA should not need to hold delegated user tokens when using server-managed sessions.
-        if (bffBase) {
-          const resp = await axios.get(`${bffBase.replace(/\/$/, '')}/api/me`, { withCredentials: true })
+        if (useBff) {
+          // Use proxied relative path in dev so cookies are same-origin via Vite proxy
+          const resp = await axios.get('/api/me', { withCredentials: true })
           this.profile = resp.data.profile
           // server may include photoDataUrl and claims
           this.photoDataUrl = resp.data.photoDataUrl || null
@@ -151,10 +156,10 @@ export const useUserStore = defineStore('user', {
         const auth = useAuthStore()
 
         // If a BFF is configured, call the BFF and let it perform OBO to Graph on behalf of the user.
-        if (bffBase) {
-          // call BFF graph forward using server-managed session
+        if (useBff) {
+          // call BFF graph forward using server-managed session (proxied)
           try {
-            const groupsResp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
+            const groupsResp = await axios.post('/api/obo/forward', {
               method: 'GET',
               path: '/v1.0/me/memberOf'
             }, { withCredentials: true })
@@ -166,7 +171,7 @@ export const useUserStore = defineStore('user', {
 
           // Optionally refresh manager via BFF
           try {
-            const mgrResp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
+            const mgrResp = await axios.post('/api/obo/forward', {
               method: 'GET',
               path: '/v1.0/me/manager'
             }, { withCredentials: true })
@@ -220,8 +225,8 @@ export const useUserStore = defineStore('user', {
       try {
         const auth = useAuthStore()
 
-        if (bffBase) {
-          const resp = await axios.post(`${bffBase.replace(/\/$/, '')}/api/obo/forward`, {
+        if (useBff) {
+          const resp = await axios.post('/api/obo/forward', {
             method: 'GET',
             path: '/v1.0/me/registeredDevices?$select=id,displayName'
           }, { withCredentials: true })
