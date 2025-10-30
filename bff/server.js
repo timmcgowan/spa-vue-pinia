@@ -192,8 +192,27 @@ async function getAppToken() {
 
 // GET /api/claims - returns decoded incoming token claims (if present)
 app.get('/api/claims', (req, res) => {
-  if (!req.userClaims) return res.status(401).json({ error: 'No bearer token provided' })
-  return res.json(req.userClaims)
+  // Return claims from session when present (BFF-managed session), otherwise
+  // fall back to decoded incoming bearer token claims. This makes it easy for
+  // the SPA to test claims when authenticating via the BFF's server-side session.
+  try {
+    const sess = req.session && req.session.tokenResponse ? req.session.tokenResponse : null
+    if (sess) {
+      // tokenResponse.account may contain account and id token claims depending on msal response
+      const account = sess.account || null
+      const sessionClaims = account && account.idTokenClaims ? account.idTokenClaims : null
+      return res.json({ source: 'session', hasSession: true, tokenInfo: { expiresOn: sess.expiresOn, account: account && (account.username || account.homeAccountId) || null }, claims: sessionClaims, account })
+    }
+
+    if (req.userClaims) {
+      return res.json({ source: 'bearer', hasSession: false, claims: req.userClaims })
+    }
+
+    return res.status(401).json({ error: 'No session or bearer token provided' })
+  } catch (e) {
+    console.error('/api/claims error', e)
+    return res.status(500).json({ error: 'Failed to read claims', details: e.message || e })
+  }
 })
 
 // --- Auth routes for BFF-managed sessions ---
