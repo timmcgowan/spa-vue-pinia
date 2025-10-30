@@ -2,7 +2,10 @@
   <div class="container">
     <div class="header">
       <h1>Profile</h1>
-      <router-link to="/">Home</router-link>
+      <div>
+        <router-link to="/">Home</router-link>
+        <router-link to="/users" style="margin-left:12px">User Lookup</router-link>
+      </div>
     </div>
 
     <div class="card">

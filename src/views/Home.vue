@@ -3,6 +3,7 @@
     <div class="header">
       <h1>Home</h1>
       <div>
+        <router-link to="/users" style="margin-right:12px">User Lookup</router-link>
         <button v-if="!isAuthenticated" @click="login">Login</button>
         <button v-else @click="logout">Logout</button>
       </div>
