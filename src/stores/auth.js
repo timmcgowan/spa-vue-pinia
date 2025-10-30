@@ -14,9 +14,9 @@ const msalConfig = {
   }
 }
 
-const loginRequest = {
-  scopes: ['User.Read']
-}
+// Default interactive login scopes. We may add the BFF scope at login time so the user can
+// consent to the BFF delegated scope up-front if configured.
+const DEFAULT_LOGIN_SCOPES = ['User.Read']
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -64,7 +64,11 @@ export const useAuthStore = defineStore('auth', {
     },
     loginRedirect() {
       this.init()
-      return this.msalInstance.loginRedirect(loginRequest)
+      // Build login scopes dynamically: include the BFF scope if configured so consent can be collected.
+      const bffScope = import.meta.env.VITE_BFF_SCOPE
+      const scopes = Array.from(DEFAULT_LOGIN_SCOPES)
+      if (bffScope) scopes.push(bffScope)
+      return this.msalInstance.loginRedirect({ scopes })
     },
     logoutRedirect() {
       if (!this.msalInstance) this.init()
