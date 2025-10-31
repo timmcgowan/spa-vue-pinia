@@ -9,7 +9,6 @@
   },
   "dependencies": {
   "@microsoft/microsoft-graph-client": "^3.0.2",
-  "@azure/msal-browser": "^2.0.0",
     "axios": "^1.4.0",
     "cross-fetch": "^3.1.5",
     "pinia": "^2.0.14",

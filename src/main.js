@@ -41,14 +41,13 @@ async function bootstrapAuth() {
 			window.location.href = `${bffBase.replace(/\/$/, '')}/auth/login`
 		} catch (e) {
 			console.error('Failed to check BFF session', e)
-			// fallback: attempt local MSAL init (for hybrid setups)
-			await auth.init()
-			if (auth.isAuthenticated) await user.loadProfile()
+			// fallback: BFF session check failed. Client-side MSAL was removed; prompt
+			// the developer to ensure BFF is configured.
+			console.warn('BFF session check failed and client-side MSAL is not available. Please ensure VITE_BFF_BASE is set.')
 		}
 	} else {
-		// No BFF configured — use local MSAL flow
-		await auth.init()
-		if (auth.isAuthenticated) await user.loadProfile()
+			// No BFF configured — client-side MSAL has been removed. The SPA requires a BFF for auth.
+			console.warn('No BFF configured (VITE_BFF_BASE missing) and client-side MSAL has been removed. The app will not authenticate.')
 	}
 }
 
