@@ -45,6 +45,16 @@ export const useAuthStore = defineStore('auth', {
     getClaims() {
       return this.claims
     },
+    // Ensure the current user is authenticated client-side (via BFF session).
+    // If not authenticated, trigger a BFF login redirect and return false.
+    // Returns true when an active session is present.
+    async ensureAuthenticated() {
+      await this.init()
+      if (this.isAuthenticated) return true
+      // not authenticated — redirect to BFF login which will set the session
+      this.loginRedirect()
+      return false
+    },
     loginRedirect() {
       const bffBase = import.meta.env.VITE_BFF_BASE || null
       if (!bffBase) {

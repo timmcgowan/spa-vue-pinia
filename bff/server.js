@@ -273,15 +273,36 @@ app.post('/auth/logout', (req, res) => {
 
 // Dev helper: inspect session state (only when BFF_DEBUG=true or running on localhost)
 app.get('/auth/session', (req, res) => {
+  // Allow session inspection in development (localhost) or when explicitly enabled
+  // in the environment (BFF_ALLOW_SESSION=true). This lets deployments expose
+  // the session debugging endpoint intentionally when needed.
   const debug = (process.env.BFF_DEBUG || 'false').toLowerCase() === 'true'
+  const allowInProd = (process.env.BFF_ALLOW_SESSION || process.env.BFF_ALLOW_SESSION_IN_PROD || 'false').toLowerCase() === 'true'
   const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1'
-  if (!debug && !isLocal) return res.status(404).send('Not found')
+  if (!debug && !isLocal && !allowInProd) return res.status(404).send('Not found')
+
   const sess = req.session || null
+
+  // Admin token guard: allow access when a correct admin header is provided.
+  // This is useful when you need to inspect sessions in a deployed environment
+  // without enabling broad access via BFF_ALLOW_SESSION. The token is set via
+  // the BFF_SESSION_DEBUG_TOKEN environment variable and must be sent in the
+  // `x-bff-admin-token` header by the caller.
+  const adminTokenEnv = process.env.BFF_SESSION_DEBUG_TOKEN || null
+  const adminHeader = (req.headers['x-bff-admin-token'] || req.headers['x-session-debug-token'] || '').toString()
+  const adminOk = adminTokenEnv && adminHeader && adminHeader === adminTokenEnv
+
   const info = {
     hasSession: !!sess && !!sess.tokenResponse,
     tokenInfo: sess && sess.tokenResponse ? { expiresOn: sess.tokenResponse.expiresOn, account: sess.tokenResponse.account && (sess.tokenResponse.account.username || sess.tokenResponse.account.homeAccountId) } : null,
-    requestedScopes: sess && sess.requestedScopes ? sess.requestedScopes : null
+    requestedScopes: sess && sess.requestedScopes ? sess.requestedScopes : null,
+    allowed: { debug, isLocal, allowInProd, adminOk }
   }
+
+  // If not allowed by debug/local/allowInProd/admin, return 404 to avoid exposing existence
+  // of the endpoint in uncontrolled environments.
+  if (!debug && !isLocal && !allowInProd && !adminOk) return res.status(404).send('Not found')
+
   return res.json(info)
 })
 

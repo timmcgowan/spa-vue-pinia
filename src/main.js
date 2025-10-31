@@ -33,8 +33,12 @@ async function bootstrapAuth() {
 			// Check session via proxied /auth/session (Vite proxy forwards to BFF)
 			const resp = await axios.get('/auth/session', { withCredentials: true })
 			if (resp && resp.data && resp.data.hasSession) {
-				// session present on server — load profile
-				await user.loadProfile()
+				// session present on server — initialize auth store (populates claims)
+				await auth.init()
+				// if auth.init confirmed the session, load profile
+				if (auth.isAuthenticated) {
+					await user.loadProfile()
+				}
 				return
 			}
 			// No session — redirect to BFF login which will start the auth code flow
